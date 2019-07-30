@@ -153,8 +153,11 @@ public:
         } else if (this->lss_flags & F_BASENAME) {
             this->lss_flags &= ~F_NAME_MASK;
             this->lss_flags |= F_FILENAME;
-        } else {
+        } else if (this->lss_flags & F_SRC_INDICATOR) {
+            this->lss_flags &= ~F_NAME_MASK;
             this->lss_flags |= F_BASENAME;
+        } else {
+            this->lss_flags |= F_SRC_INDICATOR;
         }
         if (old_flags != this->lss_flags) {
             this->clear_line_size_cache();
@@ -169,6 +172,9 @@ public:
             this->lss_flags |= F_BASENAME;
         } else if (this->lss_flags & F_BASENAME) {
             this->lss_flags &= ~F_NAME_MASK;
+            this->lss_flags |= F_SRC_INDICATOR;
+        } else if (this->lss_flags & F_SRC_INDICATOR) {
+            this->lss_flags &= ~F_NAME_MASK;
         }
         if (old_flags != this->lss_flags) {
             this->clear_line_size_cache();
@@ -181,9 +187,11 @@ public:
 
     size_t get_filename_offset() const {
         if (this->lss_flags & F_FILENAME) {
-            return this->lss_filename_width;
+            return this->lss_filename_width+1;
         } else if (this->lss_flags & F_BASENAME) {
-            return this->lss_basename_width;
+            return this->lss_basename_width+1;
+        } else if (this->lss_flags & F_SRC_INDICATOR) {
+            return 1;
         }
 
         return 0;
@@ -207,6 +215,10 @@ public:
 
     bool is_basename_enabled() const {
         return (bool) (this->lss_flags & F_BASENAME);
+    };
+
+    bool is_src_indicator_enabled() const {
+        return (bool) (this->lss_flags & F_NAME_MASK);
     };
 
     log_level_t get_min_log_level() const {
@@ -759,6 +771,7 @@ private:
         B_TIME_OFFSET,
         B_FILENAME,
         B_BASENAME,
+        B_SRC_INDICATOR
     };
 
     enum {
@@ -766,8 +779,9 @@ private:
         F_TIME_OFFSET = (1UL << B_TIME_OFFSET),
         F_FILENAME    = (1UL << B_FILENAME),
         F_BASENAME    = (1UL << B_BASENAME),
+        F_SRC_INDICATOR = (1UL << B_SRC_INDICATOR),
 
-        F_NAME_MASK   = (F_FILENAME | F_BASENAME),
+        F_NAME_MASK   = (F_FILENAME | F_BASENAME | F_SRC_INDICATOR),
     };
 
     struct __attribute__((__packed__)) indexed_content {

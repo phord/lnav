@@ -98,7 +98,7 @@ static future<string> pretty_pipe_callback(exec_context &ec,
 }
 
 logfile_sub_source::logfile_sub_source()
-    : lss_flags(0),
+    : lss_flags(F_SRC_INDICATOR),
       lss_force_rebuild(false),
       lss_token_file(NULL),
       lss_min_log_level(LEVEL_UNKNOWN),
@@ -293,7 +293,7 @@ void logfile_sub_source::text_value_for_line(textview_curses &tc,
         }
         value_out.insert(0, file_offset_end - name.size() + 1, ' ');
         value_out.insert(0, name);
-    } else {
+    } else if (this->lss_flags & F_SRC_INDICATOR) {
         // Insert space for the file/search-hit markers.
         value_out.insert(0, 1, ' ');
     }
@@ -399,11 +399,12 @@ void logfile_sub_source::text_attrs_for_line(textview_curses &lv,
                            this->lss_token_shift_size);
     }
 
-    shift_string_attrs(value_out, 0, 1);
-
-    lr.lr_start = 0;
-    lr.lr_end = 1;
+    if (this->lss_flags & F_NAME_MASK)
     {
+        shift_string_attrs(value_out, 0, 1);
+
+        lr.lr_start = 0;
+        lr.lr_end = 1;
         vis_bookmarks &bm = lv.get_bookmarks();
         bookmark_vector<vis_line_t> &bv = bm[&BM_FILES];
         bool is_first_for_file = binary_search(
@@ -437,18 +438,15 @@ void logfile_sub_source::text_attrs_for_line(textview_curses &lv,
         }
     }
 
-    value_out.emplace_back(lr, &view_curses::VC_STYLE, vc.attrs_for_ident(
-        this->lss_token_file->get_filename()));
+    if (this->lss_flags & F_NAME_MASK) {
+        value_out.emplace_back(lr, &view_curses::VC_STYLE, vc.attrs_for_ident(
+            this->lss_token_file->get_filename()));
+        size_t file_offset_end = this->get_filename_offset();
 
-    if (this->lss_flags & F_FILENAME || this->lss_flags & F_BASENAME) {
-        size_t file_offset_end = (this->lss_flags & F_FILENAME) ?
-                                    this->lss_filename_width :
-                                    this->lss_basename_width ;
-
-        shift_string_attrs(value_out, 0, file_offset_end);
+        shift_string_attrs(value_out, 0, file_offset_end-1);
 
         lr.lr_start = 0;
-        lr.lr_end   = file_offset_end + 1;
+        lr.lr_end   = file_offset_end;
         value_out.emplace_back(lr, &view_curses::VC_STYLE, vc.attrs_for_ident(
             this->lss_token_file->get_filename()));
     }

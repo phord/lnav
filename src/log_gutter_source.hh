@@ -35,6 +35,7 @@
 
 class log_gutter_source : public list_gutter_source {
 public:
+// FIXME: Hide gutters!  Woot!
     void listview_gutter_value_for_range(
         const listview_curses &lv, int start, int end, chtype &ch,
         view_colors::role_t &role_out, view_colors::role_t &bar_role_out) {
