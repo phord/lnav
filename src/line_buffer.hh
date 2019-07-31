@@ -36,14 +36,18 @@
 #include <sys/types.h>
 #include <unistd.h>
 #include <zlib.h>
+#include <stdio.h>
+#include <fcntl.h>
 
 #include <exception>
+#include <vector>
 
 #include "base/lnav_log.hh"
 #include "base/file_range.hh"
 #include "base/result.h"
 #include "auto_fd.hh"
 #include "auto_mem.hh"
+#include "lnav_util.hh"
 #include "shared_buffer.hh"
 
 struct line_info {
@@ -72,6 +76,84 @@ public:
             : e_err(err) { };
 
         int e_err;
+    };
+
+#define GZ_WINSIZE 32768U  // gz's max supported dictionary is 15-bits
+
+    /**
+     * A memoized gzip file reader that can do random file access faster than
+     * gzseek/gzread alone.
+     */
+    class gz_indexed {
+        public:
+        gz_indexed();
+        ~gz_indexed() {
+            this->close();
+        }
+
+        inline operator bool() const {
+            return !!this->gz_fd;
+        }
+
+        off_t get_source_offset() {
+            return !!*this ? this->strm.total_in + this->strm.avail_in : 0;
+        }
+
+        void close();
+        void init_stream();
+        void open(int fd);
+        int stream_data(void * buf, size_t size);
+        void seek(size_t offset);
+
+        /**
+         * Decompress bytes from the gz file returning at most `size` bytes.
+         * offset is the byte-offset in the decompressed data stream.
+         */
+        int read(void * buf, size_t offset, size_t size);
+
+        struct indexDict {
+            off_t in = 0;
+            off_t out = 0;
+            unsigned char bits = 0;
+            unsigned char in_bits = 0;
+            Bytef index[GZ_WINSIZE];
+            indexDict(z_stream const & s, const off_t size) {
+                assert((s.data_type & 128));
+                assert(!(s.data_type & 64));
+                assert(size >= s.avail_out + GZ_WINSIZE);
+                this->bits = s.data_type & 7;
+                this->in = s.total_in;
+                this->out = s.total_out;
+                auto last_byte_in = s.next_in[-1];
+                this->in_bits = last_byte_in >> (8 - this->bits);
+                // Copy the last 32k uncompressed data (sliding window) to our index
+                memcpy(this->index, s.next_out - GZ_WINSIZE, GZ_WINSIZE);
+            }
+
+            int apply(z_streamp s) {
+                s->zalloc = Z_NULL;
+                s->zfree = Z_NULL;
+                s->opaque = Z_NULL;
+                s->avail_in = 0;
+                s->next_in = Z_NULL;
+                auto ret = inflateInit2(s, -15);  // raw inflate
+                if (ret != Z_OK) {
+                    return ret;
+                }
+                if (this->bits) {
+                    inflatePrime(s, this->bits, this->in_bits);
+                }
+                s->total_in = this->in;
+                s->total_out = this->out;
+                inflateSetDictionary(s, this->index, GZ_WINSIZE);
+                return ret;
+            }
+        };
+    private:
+        z_stream                strm;               /*< gzip streams structure */
+        std::vector<indexDict>  syncpoints;         /*< indexed dictionaries as discovered */
+        auto_mem<Bytef>         inbuf;              /*< Compressed data buffer */
+        int gz_fd = 0;                              /*< The file to read data from. */
     };
 
     /** Construct an empty line_buffer. */
@@ -103,7 +185,7 @@ public:
     };
 
     bool is_compressed() const {
-        return this->lb_gz_file != NULL || this->lb_bz_file;
+        return this->lb_gz_file || this->lb_bz_file;
     };
 
     off_t get_read_offset(off_t off) const
@@ -235,7 +317,7 @@ private:
     shared_buffer lb_share_manager;
 
     auto_fd lb_fd;              /*< The file to read data from. */
-    gzFile  lb_gz_file;         /*< File handle for gzipped files. */
+    gz_indexed  lb_gz_file;     /*< File reader for gzipped files. */
     bool    lb_bz_file;         /*< Flag set for bzip2 compressed files. */
     off_t   lb_compressed_offset; /*< The offset into the compressed file. */
 
