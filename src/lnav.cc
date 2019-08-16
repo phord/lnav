@@ -608,7 +608,12 @@ void rebuild_indexes()
     }
 
     log_perf();
-    logfile_sub_source::rebuild_result result = lss.rebuild_index();
+
+    logfile_sub_source::rebuild_result result;
+    do {
+        result = lss.rebuild_index();
+    } while (lnav_data.ld_flags & LNF_HEADLESS &&
+             result != logfile_sub_source::rebuild_result::rr_no_change);
 
     log_perf();
 
