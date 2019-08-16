@@ -600,8 +600,15 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
 
     log_perf();
             if (!this->tss_view->is_paused()) {
-                switch (lf.rebuild_index()) {
+                auto rebuild = lf.rebuild_index(/* last_indexed_line->get_timeval() */);
     log_perf();
+                if (rebuild == logfile::RR_NO_NEW_LINES) {
+                        // No new lines, but do we still have lines we haven't processed?
+                        if (ld.ld_lines_indexed < lf.size()) {
+                            rebuild = logfile::RR_NEW_LINES;
+                        }
+                }
+                switch (rebuild) {
                     case logfile::RR_NO_NEW_LINES:
                         // No changes
                         break;
@@ -642,7 +649,8 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     }
 
     log_perf();
-    if (force) {
+    constexpr bool never_force = true;
+    if (force && !never_force) {
         full_sort = true;
         for (iter = this->lss_files.begin();
              iter != this->lss_files.end();
@@ -659,7 +667,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
 
     if (retval != rebuild_result::rr_no_change || force) {
         size_t index_size = 0, start_size = this->lss_index.size();
-        logline_cmp line_cmper(*this);
 
         for (auto ld : this->lss_files) {
             std::shared_ptr<logfile> lf = ld->get_file();
@@ -694,6 +701,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
 
             // XXX get rid of this full sort on the initial run, it's not
             // needed unless the file is not in time-order
+            logline_cmp line_cmper(*this);
             sort(this->lss_index.begin(), this->lss_index.end(), line_cmper);
         log_perf();
         } else {
@@ -709,10 +717,12 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                     continue;
                 }
 
-                merge.add(ld,
-                          lf->begin() + ld->ld_lines_indexed,
-                          lf->end());
-                index_size += lf->size();
+                auto begin = lf->begin() + ld->ld_lines_indexed;
+                if (begin == lf->end()) {
+                    continue;
+                }
+
+                merge.add(ld, begin, lf->end());
             }
 
             merge.execute();
@@ -725,25 +735,23 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 }
 
                 int file_index = ld->ld_file_index;
-                int line_index = lf_iter - ld->get_file()->begin();
+                int line_index = ld->ld_lines_indexed++;
+                ensure(lf_iter - ld->get_file()->begin() == line_index);
 
                 content_line_t con_line(file_index * MAX_LINES_PER_FILE +
                                         line_index);
 
                 this->lss_index.push_back(con_line);
 
+                if (lf_iter+1 == ld->get_file()->end())
+                {
+                    // stop when we consume the last line of any source file being merged
+                    break;
+                }
                 merge.next();
             }
         }
 
-        for (iter = this->lss_files.begin();
-             iter != this->lss_files.end();
-             iter++) {
-            if ((*iter)->get_file() == NULL)
-                continue;
-
-            (*iter)->ld_lines_indexed = (*iter)->get_file()->size();
-        }
 
         this->lss_filtered_index.reserve(this->lss_index.size());
 
@@ -777,6 +785,10 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
             this->lss_index_delegate->index_complete(*this);
         }
         log_perf();
+    }
+
+    if (retval == rebuild_result::rr_full_rebuild && never_force) {
+        retval = rebuild_result::rr_appended_lines;
     }
 
     switch (retval) {
