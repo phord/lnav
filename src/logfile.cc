@@ -275,10 +275,31 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
     this->lf_activity.la_polls += 1;
 
+    static int perf_index = -1;
+    static struct rusage mark[2];
+    if (perf_index<0) {
+        getrusage(RUSAGE_SELF, &mark[0]);
+        perf_index = 1;
     if (fstat(this->lf_line_buffer.get_fd(), &st) == -1) {
         throw error(this->lf_filename, errno);
     }
 
+    #define log_perf() { \
+        getrusage(RUSAGE_SELF, &mark[perf_index]); \
+        perf_index = !perf_index; \
+        static struct rusage perf; \
+        rusagesub(mark[!perf_index], mark[perf_index], mark[perf_index]); \
+        rusageadd(perf, mark[perf_index], perf); \
+        if (0) log_info("CPU time(%4u):    utime=%d.%06d    stime=%d.%06d  cum:   utime=%d.%06d  stime=%d.%06d", \
+            __LINE__, \
+            mark[perf_index].ru_utime.tv_sec, mark[perf_index].ru_utime.tv_usec, \
+            mark[perf_index].ru_stime.tv_sec, mark[perf_index].ru_stime.tv_usec, \
+            perf.ru_utime.tv_sec, perf.ru_utime.tv_usec, \
+            perf.ru_stime.tv_sec, perf.ru_stime.tv_usec); \
+        }
+
+    // This line should log the time we spend *outside* this function
+    log_perf();
     // Check the previous stat against the last to see if things are wonky.
     if (st.st_size < this->lf_stat.st_size ||
         (this->lf_stat.st_size == st.st_size &&
@@ -307,12 +328,14 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
         if (!this->lf_index.empty()) {
             off = this->lf_index.back().get_offset();
+        log_perf();
 
             /*
              * Drop the last line we read since it might have been a partial
              * read.
              */
             while (this->lf_index.back().get_sub_offset() != 0) {
+        log_perf();
                 this->lf_index.pop_back();
                 rollback_size += 1;
             }
@@ -348,6 +371,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
         auto prev_range = file_range{off};
         while (true) {
+    log_perf();
             auto load_result = this->lf_line_buffer.load_next_line(prev_range);
 
             if (load_result.isErr()) {
@@ -412,6 +436,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
             }
         }
 
+    log_perf();
         if (this->lf_logline_observer != nullptr) {
             this->lf_logline_observer->logline_eof(*this);
         }
@@ -443,6 +468,8 @@ logfile::rebuild_result_t logfile::rebuild_index()
         }
     }
 
+    log_perf();
+
     this->lf_index_time = this->lf_line_buffer.get_file_time();
     if (!this->lf_index_time) {
         this->lf_index_time = st.st_mtime;
@@ -454,6 +481,8 @@ logfile::rebuild_result_t logfile::rebuild_index()
                  this->lf_filename.c_str());
         this->lf_out_of_time_order_count = 0;
     }
+
+    log_perf();
 
     return retval;
 }
