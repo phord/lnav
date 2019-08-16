@@ -486,7 +486,6 @@ public:
             s_row.sr_column_size = sr.sr_column_size;
             delete s_row.sr_values;
             s_row.sr_values = new spectrogram_row::row_bucket[width + 1];
-            memset(s_row.sr_values, 0, sizeof(int) * (width + 1));
             this->ss_value_source->spectro_row(sr, s_row);
         }
 
