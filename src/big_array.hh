@@ -49,10 +49,8 @@ struct big_array {
             return false;
         }
 
-        if (this->ba_ptr) {
-            munmap(this->ba_ptr,
-                   roundup_size(this->ba_capacity * sizeof(T), getpagesize()));
-        }
+        auto old_capacity = this->ba_capacity;
+        auto old_ba_ptr = this->ba_ptr;
 
         this->ba_capacity = size + DEFAULT_INCREMENT;
         void *result = mmap(nullptr,
@@ -67,7 +65,13 @@ struct big_array {
 
         this->ba_ptr = (T *) result;
 
-        return true;
+        if (old_ba_ptr) {
+            memcpy(this->ba_ptr, old_ba_ptr, old_capacity * sizeof(T));
+            munmap(old_ba_ptr,
+                   roundup_size(old_capacity * sizeof(T), getpagesize()));
+        }
+
+        return false;
     };
 
     void clear() {
