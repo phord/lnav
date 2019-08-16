@@ -271,7 +271,6 @@ bool logfile::process_prefix(shared_buffer_ref &sbr, const line_info &li)
 logfile::rebuild_result_t logfile::rebuild_index()
 {
     rebuild_result_t retval = RR_NO_NEW_LINES;
-    struct stat st;
 
     this->lf_activity.la_polls += 1;
 
@@ -280,8 +279,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
     if (perf_index<0) {
         getrusage(RUSAGE_SELF, &mark[0]);
         perf_index = 1;
-    if (fstat(this->lf_line_buffer.get_fd(), &st) == -1) {
-        throw error(this->lf_filename, errno);
     }
 
     #define log_perf() { \
@@ -300,72 +297,82 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
     // This line should log the time we spend *outside* this function
     log_perf();
-    // Check the previous stat against the last to see if things are wonky.
-    if (st.st_size < this->lf_stat.st_size ||
-        (this->lf_stat.st_size == st.st_size &&
-         this->lf_stat.st_mtime != st.st_mtime)) {
-        log_info("overwritten file detected, closing -- %s",
-                 this->lf_filename.c_str());
-        this->close();
-        return RR_NO_NEW_LINES;
+    struct rusage begin_rusage;
+    size_t begin_size = this->lf_index.size();
+    bool record_rusage = this->lf_index.size() == 1;
+    off_t begin_index_size = this->lf_index_size;
+
+    if (record_rusage) {
+        getrusage(RUSAGE_SELF, &begin_rusage);
     }
-    else if (this->lf_line_buffer.is_data_available(this->lf_index_size, st.st_size)) {
-        this->lf_activity.la_reads += 1;
 
-        // We haven't reached the end of the file.  Note that we use the
-        // line buffer's notion of the file size since it may be compressed.
-        bool has_format = this->lf_format.get() != nullptr;
-        struct rusage begin_rusage;
-        off_t off;
-        size_t begin_size = this->lf_index.size();
-        bool record_rusage = this->lf_index.size() == 1;
-        off_t begin_index_size = this->lf_index_size;
-        size_t rollback_size = 0;
-
-        if (record_rusage) {
-            getrusage(RUSAGE_SELF, &begin_rusage);
+    if (!this->lf_line_buffer.is_data_available(this->lf_index_size, this->lf_stat.st_size)) {
+        struct stat st;
+        // FIXME: Add option to disable file-following so we don't slog on fuse
+        if (fstat(this->lf_line_buffer.get_fd(), &st) == -1) {
+            throw error(this->lf_filename, errno);
         }
 
-        if (!this->lf_index.empty()) {
-            off = this->lf_index.back().get_offset();
+        // Check the previous stat against the last to see if things are wonky.
+        if (st.st_size < this->lf_stat.st_size ||
+            (this->lf_stat.st_size == st.st_size &&
+            this->lf_stat.st_mtime != st.st_mtime)) {
+            log_info("overwritten file detected, closing -- %s",
+                    this->lf_filename.c_str());
+            this->close();
+            return RR_NO_NEW_LINES;
+        }
+        this->lf_stat = st;
+
         log_perf();
 
-            /*
-             * Drop the last line we read since it might have been a partial
-             * read.
-             */
-            while (this->lf_index.back().get_sub_offset() != 0) {
+        if (this->lf_line_buffer.is_data_available(this->lf_index_size, this->lf_stat.st_size)) {
+            this->lf_activity.la_reads += 1;
+
+            // We haven't reached the end of the file.  Note that we use the
+            // line buffer's notion of the file size since it may be compressed.
+            size_t rollback_size = 0;
         log_perf();
+            if (!this->lf_index.empty()) {
+
+                /*
+                * Drop the last line we read since it might have been a partial
+                * read.
+                */
+                while (this->lf_index.back().get_sub_offset() != 0) {
+                    this->lf_index.pop_back();
+                    rollback_size += 1;
+                }
                 this->lf_index.pop_back();
                 rollback_size += 1;
-            }
-            this->lf_index.pop_back();
-            rollback_size += 1;
 
-            this->lf_line_buffer.clear();
-            if (!this->lf_index.empty()) {
-                off_t check_line_off = this->lf_index.back().get_offset();
+                this->lf_line_buffer.clear();   // XXX: Why do we have to clear this buffer?
+                if (!this->lf_index.empty()) {
+                    off_t check_line_off = this->lf_index.back().get_offset();
 
-                auto read_result = this->lf_line_buffer.read_range({
-                    check_line_off, this->lf_index_size - check_line_off
-                });
+                    auto read_result = this->lf_line_buffer.read_range({
+                        check_line_off, this->lf_index_size - check_line_off
+                    });
 
-                if (read_result.isErr()) {
-                    log_info("overwritten file detected, closing -- %s (%s)",
-                             this->lf_filename.c_str(),
-                             read_result.unwrapErr().c_str());
-                    this->close();
-                    return RR_INVALID;
+                    if (read_result.isErr()) {
+                        log_info("overwritten file detected, closing -- %s (%s)",
+                                this->lf_filename.c_str(),
+                                read_result.unwrapErr().c_str());
+                        this->close();
+                        return RR_INVALID;
+                    }
                 }
             }
+            if (this->lf_logline_observer != NULL) {
+                this->lf_logline_observer->logline_restart(*this, rollback_size);
+            }
         }
-        else {
-            off = 0;
-        }
-        if (this->lf_logline_observer != NULL) {
-            this->lf_logline_observer->logline_restart(*this, rollback_size);
-        }
+    }
 
+    if (this->lf_line_buffer.is_data_available(this->lf_index_size, this->lf_stat.st_size)) {
+
+        off_t off = this->lf_index.empty() ? 0 : this->lf_index.back().get_offset();
+        bool has_format = this->lf_format.get() != nullptr;
         bool sort_needed = this->lf_sort_needed;
         this->lf_sort_needed = false;
 
@@ -428,7 +435,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
                 this->lf_logfile_observer->logfile_indexing(
                     *this,
                     this->lf_line_buffer.get_read_offset(li.li_file_range.next_offset()),
-                    st.st_size);
+                    this->lf_stat.st_size);
             }
 
             if (!has_format && this->lf_format != nullptr) {
@@ -459,7 +466,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
          * size.
          */
         this->lf_index_size = prev_range.next_offset();
-        this->lf_stat = st;
 
         if (sort_needed) {
             retval = RR_NEW_ORDER;
@@ -472,7 +478,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
     this->lf_index_time = this->lf_line_buffer.get_file_time();
     if (!this->lf_index_time) {
-        this->lf_index_time = st.st_mtime;
+        this->lf_index_time = this->lf_stat.st_mtime;
     }
 
     if (this->lf_out_of_time_order_count) {
