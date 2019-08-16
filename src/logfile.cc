@@ -424,9 +424,9 @@ logfile::rebuild_result_t logfile::rebuild_index()
                 old_size = 0;
             }
 
-            for (auto iter = this->begin() + old_size;
-                    iter != this->end(); ++iter) {
-                if (this->lf_logline_observer != nullptr) {
+            if (this->lf_logline_observer != nullptr) {
+                for (auto iter = this->begin() + old_size;
+                        iter != this->end(); ++iter) {
                     this->lf_logline_observer->logline_new_line(*this, iter, sbr);
                 }
             }
