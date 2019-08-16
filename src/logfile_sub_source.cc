@@ -639,7 +639,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 }
             }
             file_count += 1;
-            total_lines += (*iter)->get_file()->size();
+            total_lines += lf.size();
         }
     }
 
@@ -666,7 +666,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     }
 
     if (retval != rebuild_result::rr_no_change || force) {
-        size_t index_size = 0, start_size = this->lss_index.size();
+        size_t start_size = this->lss_index.size();
 
         for (auto ld : this->lss_files) {
             std::shared_ptr<logfile> lf = ld->get_file();
@@ -751,9 +751,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 merge.next();
             }
         }
-
-
-        this->lss_filtered_index.reserve(this->lss_index.size());
 
         uint32_t filter_in_mask, filter_out_mask;
         this->get_filters().get_enabled_mask(filter_in_mask, filter_out_mask);
