@@ -389,6 +389,7 @@ public:
             off = total;
         }
 
+        // FIXME: Use total of all files, and offset of all files
         if ((((size_t)off == total) && (this->lo_last_offset != off)) ||
             ui_periodic_timer::singleton().time_to_update(index_counter)) {
             lnav_data.ld_bottom_source.update_loading(off, total);
@@ -1677,6 +1678,7 @@ static void looper()
                 else {
                     timer.start_fade(index_counter, 3);
                 }
+                // FIXME: Go faster if there's more data?
                 rebuild_indexes();
                 if (!initial_build &&
                         lnav_data.ld_log_source.text_line_count() == 0 &&
@@ -1712,6 +1714,7 @@ static void looper()
                 }
 
                 if (!session_loaded) {
+                    // FIXME: Restore some session settings after files are loaded?
                     load_session();
                     if (!lnav_data.ld_session_file_names.empty()) {
                         std::string ago;

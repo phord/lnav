@@ -577,6 +577,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     // This line should log the time we spend *outside* this function
     log_perf();
     bool force = this->lss_force_rebuild;
+    // FIXME: Handle external force requests more gently
     rebuild_result retval = rebuild_result::rr_no_change;
 
     this->lss_force_rebuild = false;
@@ -584,6 +585,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         retval = rebuild_result::rr_full_rebuild;
     }
 
+    // Find new lines in all files
     for (iter = this->lss_files.begin();
          iter != this->lss_files.end();
          iter++) {
@@ -600,6 +602,14 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
 
     log_perf();
             if (!this->tss_view->is_paused()) {
+
+                // Find new lines in this file; results are in lf
+                // FIXME: Change this so we _never_ rebuild the index.  So the return value here
+                // doesn't matter.  But maybe we have some lines that need to be inserted into the
+                // existing index.  We can find those with the time_skew flag, but we also need to
+                // find ones that are before our most recent line(s). So, let's pass the latest time
+                // in to rebuild_index so he can tell us which of his lines are already out of order
+                // wrt that and to each other.
                 auto rebuild = lf.rebuild_index(/* last_indexed_line->get_timeval() */);
     log_perf();
                 if (rebuild == logfile::RR_NO_NEW_LINES) {
@@ -624,6 +634,10 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                             // If there are new lines that are older than what we
                             // have in the index, we need to resort.
                             if (last_indexed_line == nullptr ||
+
+                            // FIXME: Change this to find the position in the existing sort where these new lines
+                            // would be inserted. Then remove lines to that position from all files, and run
+                            // merge-insert again.  Add a new rebuild_result, rr_inserted_lines.
                                 new_file_line <
                                 last_indexed_line->get_timeval()) {
                                 force = true;
@@ -644,6 +658,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     }
 
     log_perf();
+    // big_array::reserve is non-destructive
     if (this->lss_index.reserve(total_lines)) {
         force = true;
     }
@@ -652,12 +667,15 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     constexpr bool never_force = true;
     if (force && !never_force) {
         full_sort = true;
+
+        // FORCE: reset indexed lines in all files back to zero
         for (iter = this->lss_files.begin();
              iter != this->lss_files.end();
              iter++) {
             (*iter)->ld_lines_indexed = 0;
         }
 
+        // FORCE: wipe out indexed data
         this->lss_index.clear();
         this->lss_filtered_index.clear();
         this->lss_longest_line = 0;
@@ -668,6 +686,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     if (retval != rebuild_result::rr_no_change || force) {
         size_t start_size = this->lss_index.size();
 
+        // Get longest lines, widest filenames, etc, among all files
         for (auto ld : this->lss_files) {
             std::shared_ptr<logfile> lf = ld->get_file();
 
@@ -683,6 +702,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         }
 
         log_perf();
+        // Sort the whole thing
         if (full_sort) {
             for (auto ld : this->lss_files) {
                 shared_ptr<logfile> lf = ld->get_file();
@@ -691,6 +711,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                     continue;
                 }
 
+                // Recreate lss_index from scratch as (HIGH:file_index :: LOW:line_number)
                 for (size_t line_index = 0; line_index < lf->size(); line_index++) {
                     content_line_t con_line(ld->ld_file_index * MAX_LINES_PER_FILE +
                                             line_index);
@@ -699,10 +720,13 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 }
             }
 
+            log_info("DELAY> Sorting");
+
             // XXX get rid of this full sort on the initial run, it's not
             // needed unless the file is not in time-order
             logline_cmp line_cmper(*this);
             sort(this->lss_index.begin(), this->lss_index.end(), line_cmper);
+            log_info("DELAY< Sorting");
         log_perf();
         } else {
             kmerge_tree_c<logline, logfile_data, logfile::iterator> merge(
@@ -734,10 +758,12 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                     break;
                 }
 
+
                 int file_index = ld->ld_file_index;
                 int line_index = ld->ld_lines_indexed++;
                 ensure(lf_iter - ld->get_file()->begin() == line_index);
 
+                // Add onto lss_index as (HIGH:file_index :: LOW:line_number), already sorted
                 content_line_t con_line(file_index * MAX_LINES_PER_FILE +
                                         line_index);
 
@@ -755,10 +781,16 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         uint32_t filter_in_mask, filter_out_mask;
         this->get_filters().get_enabled_mask(filter_in_mask, filter_out_mask);
 
+        // notify the delegate (might need work here; histograms?)
         if (start_size == 0 && this->lss_index_delegate != NULL) {
             this->lss_index_delegate->index_start(*this);
         }
 
+        // Build lss_filtered_index: vector of lss_index indexes
+        // FIXME: If lss_index changes because of order sorting, related
+        //  filtered_index changes, too.  It should be easy to apply the
+        //  changes, though, since the lss_index items should always move
+        //  forward by some regular amount.
         for (size_t index_index = start_size;
              index_index < this->lss_index.size();
              index_index++) {
@@ -778,11 +810,21 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
             }
         }
 
+        // notify the delegate (might need work here; histograms?)
         if (this->lss_index_delegate != nullptr) {
             this->lss_index_delegate->index_complete(*this);
         }
         log_perf();
     }
+
+    // FIXME: (Somewhere else...)  after lss_filtered_index is rebuilt, the existing
+    // search (highlight, bookmarks, etc.) is reapplied from scratch. Instead it should be simple
+    // enough to modify the existing search results.
+    //   If the new filter removed lines, just remove those same lines from the search results.
+    //   If the new filter added lines, check only those added lines to update the search results.
+    //
+    // Maybe what is needed is some notification call like this:
+    //    filter_changed(added_lines_vec, removed_lines_vec);
 
     if (retval == rebuild_result::rr_full_rebuild && never_force) {
         retval = rebuild_result::rr_appended_lines;

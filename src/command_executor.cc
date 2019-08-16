@@ -68,6 +68,7 @@ int sql_progress(const struct log_cursor &lc)
     }
 
     if (ui_periodic_timer::singleton().time_to_update(sql_counter)) {
+        // FIXME: Use total of all files, and offset of all files
         lnav_data.ld_bottom_source.update_loading(off, total);
         lnav_data.ld_top_source.update_time();
         lnav_data.ld_status[LNS_TOP].do_update();

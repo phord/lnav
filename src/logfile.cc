@@ -213,7 +213,6 @@ bool logfile::process_prefix(shared_buffer_ref &sbr, const line_info &li)
                         for (size_t lpc = prescan_size;
                              lpc < this->lf_index.size(); lpc++) {
                             logline &line_to_update = this->lf_index[lpc];
-
                             line_to_update.set_time_skew(true);
                             line_to_update.set_time(second_to_last.get_time());
                             line_to_update.set_millis(
@@ -292,6 +291,9 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
     // This line should log the time we spend *outside* this function
     log_perf();
+
+    // TODO: Run this continuously in a thread and poll for updates in logfile_sub_source.cc in real-time
+
     struct rusage begin_rusage;
     size_t begin_size = this->lf_index.size();
     bool record_rusage = this->lf_index.size() == 1;
@@ -327,6 +329,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
             // We haven't reached the end of the file.  Note that we use the
             // line buffer's notion of the file size since it may be compressed.
             size_t rollback_size = 0;
+
         log_perf();
             if (!this->lf_index.empty()) {
 
@@ -408,21 +411,25 @@ logfile::rebuild_result_t logfile::rebuild_index()
                     .unwrapOr(text_format_t::TF_UNKNOWN);
             }
 
+            // Get the line text itself
             auto read_result = this->lf_line_buffer.read_range(li.li_file_range);
             if (read_result.isErr()) {
                 this->close();
                 return RR_INVALID;
             }
 
+            // Trim at line delimiter (CR or LF) and parse timestamp, adjust skew, etc.
             auto sbr = read_result.unwrap().rtrim(is_line_ending);
             this->lf_longest_line = std::max(this->lf_longest_line, sbr.length());
             this->lf_partial_line = li.li_partial;
+            // Note: for time-ordered logs, sort_needed is always false after we choose a log format (but always true until then -- wtf?)
             sort_needed = this->process_prefix(sbr, li) || sort_needed;
 
             if (old_size > this->lf_index.size()) {
                 old_size = 0;
             }
 
+            // Notify per-line observers about new lines
             if (this->lf_logline_observer != nullptr) {
                 for (auto iter = this->begin() + old_size;
                         iter != this->end(); ++iter) {
@@ -430,6 +437,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
                 }
             }
 
+            // Notify per-file observers about new buffer line locations...?
             if (this->lf_logfile_observer != nullptr) {
                 this->lf_logfile_observer->logfile_indexing(
                     *this,
