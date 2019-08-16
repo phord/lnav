@@ -336,10 +336,6 @@ public:
 
     /**
      * Index any new data in the log file.
-     *
-     * @param lo The observer object that will be called regularly during
-     * indexing.
-     * @return True if any new lines were indexed.
      */
     rebuild_result_t rebuild_index();
 

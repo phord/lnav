@@ -170,11 +170,6 @@ bool logfile::process_prefix(shared_buffer_ref &sbr, const line_info &li)
             this->set_format_base_time(*iter);
             found = (*iter)->scan(*this, this->lf_index, li.li_file_range.fr_offset, sbr);
             if (found == log_format::SCAN_MATCH) {
-#if 0
-                require(this->lf_index.size() == 1 ||
-                       (this->lf_index[this->lf_index.size() - 2] <
-                        this->lf_index[this->lf_index.size() - 1]));
-#endif
                 log_info("%s:%d:log format found -- %s",
                     this->lf_filename.c_str(),
                     this->lf_index.size(),
