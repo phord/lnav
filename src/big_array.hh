@@ -52,7 +52,7 @@ struct big_array {
         auto old_capacity = this->ba_capacity;
         auto old_ba_ptr = this->ba_ptr;
 
-        this->ba_capacity = size + DEFAULT_INCREMENT;
+        this->ba_capacity = std::max(old_capacity * 2 , size + DEFAULT_INCREMENT);
         void *result = mmap(nullptr,
                             roundup_size(this->ba_capacity * sizeof(T),
                                          getpagesize()),
