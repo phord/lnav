@@ -375,10 +375,14 @@ logfile::rebuild_result_t logfile::rebuild_index()
         bool has_format = this->lf_format.get() != nullptr;
         bool sort_needed = this->lf_sort_needed;
         this->lf_sort_needed = false;
-
         auto prev_range = file_range{off};
-        while (true) {
+
     log_perf();
+        // Parse up to 10,000 lines at a time, but don't stop in the middle of a block
+        size_t line_limit = 10000;
+        while (line_limit || this->lf_index.back().get_sub_offset() != 0) {
+            line_limit -= !!line_limit;
+            // Load the next line into the cache and find it
             auto load_result = this->lf_line_buffer.load_next_line(prev_range);
 
             if (load_result.isErr()) {
@@ -444,11 +448,28 @@ logfile::rebuild_result_t logfile::rebuild_index()
         }
 
     log_perf();
-        if (this->lf_logline_observer != nullptr) {
+        off = prev_range.next_offset();
+
+        if (!line_limit) {
+            // We didn't reach eof.  Drop the last line in case it's the middle of a multiline block
+            bool safe_to_stop ;
+            do {
+                safe_to_stop = this->lf_index.back().get_sub_offset() == 0;
+                this->lf_index.pop_back();
+            } while (!safe_to_stop && !this->lf_index.empty());
+        }
+
+        if (sort_needed) {
+            retval = RR_NEW_ORDER;
+        } else {
+            retval = RR_NEW_LINES;
+        }
+
+        if (!!line_limit && this->lf_logline_observer != nullptr) {
             this->lf_logline_observer->logline_eof(*this);
         }
 
-        if (record_rusage && (prev_range.fr_offset - begin_index_size) > (500 * 1024)) {
+        if (record_rusage && (off - begin_index_size) > (500 * 1024)) {
             struct rusage end_rusage;
 
             getrusage(RUSAGE_SELF, &end_rusage);
@@ -465,13 +486,7 @@ logfile::rebuild_result_t logfile::rebuild_index()
          * doing the scanning, so use the line buffer's notion of the file
          * size.
          */
-        this->lf_index_size = prev_range.next_offset();
-
-        if (sort_needed) {
-            retval = RR_NEW_ORDER;
-        } else {
-            retval = RR_NEW_LINES;
-        }
+        this->lf_index_size = off;
     }
 
     log_perf();
