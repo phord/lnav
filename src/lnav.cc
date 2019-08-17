@@ -2480,6 +2480,7 @@ int main(int argc, char *argv[])
                 // Read all of stdin
                 wait_for_pipers();
                 rebuild_indexes();
+                // FIXME: wait for all file data to load before executing initial commands
 
                 log_tc->set_top(vis_line_t(0));
                 text_tc = &lnav_data.ld_views[LNV_TEXT];

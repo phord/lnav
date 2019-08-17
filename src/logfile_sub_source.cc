@@ -748,6 +748,10 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
             }
         }
 
+        if (this->lss_filtered_index.empty()) {
+            this->lss_filtered_index.reserve(this->lss_index.size());
+        }
+
         uint32_t filter_in_mask, filter_out_mask;
         this->get_filters().get_enabled_mask(filter_in_mask, filter_out_mask);
 

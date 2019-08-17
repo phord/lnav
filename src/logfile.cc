@@ -268,9 +268,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
     this->lf_activity.la_polls += 1;
 
-    }
-
-
     // TODO: Run this continuously in a thread and poll for updates in logfile_sub_source.cc in real-time
 
     struct rusage begin_rusage;
