@@ -524,30 +524,6 @@ public:
 
 void rebuild_indexes()
 {
-    static int perf_index = -1;
-    static struct rusage mark[2];
-    if (perf_index<0) {
-        getrusage(RUSAGE_SELF, &mark[0]);
-        perf_index = 1;
-    }
-
-    #define log_perf() { \
-        getrusage(RUSAGE_SELF, &mark[perf_index]); \
-        perf_index = !perf_index; \
-        static struct rusage perf; \
-        rusagesub(mark[!perf_index], mark[perf_index], mark[perf_index]); \
-        rusageadd(perf, mark[perf_index], perf); \
-        log_info("CPU time(%4u):    utime=%d.%06d    stime=%d.%06d  cum:   utime=%d.%06d  stime=%d.%06d", \
-            __LINE__, \
-            mark[perf_index].ru_utime.tv_sec, mark[perf_index].ru_utime.tv_usec, \
-            mark[perf_index].ru_stime.tv_sec, mark[perf_index].ru_stime.tv_usec, \
-            perf.ru_utime.tv_sec, perf.ru_utime.tv_usec, \
-            perf.ru_stime.tv_sec, perf.ru_stime.tv_usec); \
-        }
-
-    // This line should log the time we spend *outside* this function
-    log_perf();
-
     logfile_sub_source &lss = lnav_data.ld_log_source;
     textview_curses &log_view  = lnav_data.ld_views[LNV_LOG];
     textview_curses &text_view = lnav_data.ld_views[LNV_TEXT];
@@ -608,16 +584,12 @@ void rebuild_indexes()
         }
     }
 
-    log_perf();
 
     logfile_sub_source::rebuild_result result;
     do {
         result = lss.rebuild_index();
     } while (lnav_data.ld_flags & LNF_HEADLESS &&
              result != logfile_sub_source::rebuild_result::rr_no_change);
-
-    log_perf();
-
     if (result != logfile_sub_source::rebuild_result::rr_no_change) {
         size_t new_count = lss.text_line_count();
         bool force =
@@ -630,7 +602,6 @@ void rebuild_indexes()
 
         log_view.reload_data();
     }
-    log_perf();
 
     for (int lpc = 0; lpc < LNV__MAX; lpc++) {
         textview_curses &scroll_view = lnav_data.ld_views[lpc];
@@ -639,15 +610,11 @@ void rebuild_indexes()
             scroll_view.set_top(scroll_view.get_top_for_last_row());
         }
     }
-    log_perf();
 
     lnav_data.ld_view_stack.top() | [] (auto tc) {
         lnav_data.ld_filter_status_source.update_filtered(tc->get_sub_source());
         lnav_data.ld_scroll_broadcaster.invoke(tc);
     };
-
-    log_perf();
-
 }
 
 static bool append_default_files(lnav_flags_t flag)

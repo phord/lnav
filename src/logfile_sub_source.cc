@@ -552,30 +552,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     size_t total_lines = 0;
     bool full_sort = false;
     int file_count = 0;
-
-    static int perf_index = -1;
-    static struct rusage mark[2];
-    if (perf_index<0) {
-        getrusage(RUSAGE_SELF, &mark[0]);
-        perf_index = 1;
-    }
-
-    #define log_perf() { \
-        getrusage(RUSAGE_SELF, &mark[perf_index]); \
-        perf_index = !perf_index; \
-        static struct rusage perf; \
-        rusagesub(mark[!perf_index], mark[perf_index], mark[perf_index]); \
-        rusageadd(perf, mark[perf_index], perf); \
-        log_info("CPU time(%4u):    utime=%d.%06d    stime=%d.%06d  cum:   utime=%d.%06d  stime=%d.%06d", \
-            __LINE__, \
-            mark[perf_index].ru_utime.tv_sec, mark[perf_index].ru_utime.tv_usec, \
-            mark[perf_index].ru_stime.tv_sec, mark[perf_index].ru_stime.tv_usec, \
-            perf.ru_utime.tv_sec, perf.ru_utime.tv_usec, \
-            perf.ru_stime.tv_sec, perf.ru_stime.tv_usec); \
-        }
-
-    // This line should log the time we spend *outside* this function
-    log_perf();
     bool force = this->lss_force_rebuild;
     // FIXME: Handle external force requests more gently
     rebuild_result retval = rebuild_result::rr_no_change;
@@ -600,7 +576,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         else {
             logfile &lf = *ld.get_file();
 
-    log_perf();
             if (!this->tss_view->is_paused()) {
 
                 // Find new lines in this file; results are in lf
@@ -611,7 +586,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 // in to rebuild_index so he can tell us which of his lines are already out of order
                 // wrt that and to each other.
                 auto rebuild = lf.rebuild_index(/* last_indexed_line->get_timeval() */);
-    log_perf();
                 if (rebuild == logfile::RR_NO_NEW_LINES) {
                         // No new lines, but do we still have lines we haven't processed?
                         if (ld.ld_lines_indexed < lf.size()) {
@@ -657,13 +631,11 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         }
     }
 
-    log_perf();
     // big_array::reserve is non-destructive
     if (this->lss_index.reserve(total_lines)) {
         force = true;
     }
 
-    log_perf();
     constexpr bool never_force = true;
     if (force && !never_force) {
         full_sort = true;
@@ -701,7 +673,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 this->lss_filename_width, lf->get_filename().size());
         }
 
-        log_perf();
         // Sort the whole thing
         if (full_sort) {
             for (auto ld : this->lss_files) {
@@ -727,7 +698,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
             logline_cmp line_cmper(*this);
             sort(this->lss_index.begin(), this->lss_index.end(), line_cmper);
             log_info("DELAY< Sorting");
-        log_perf();
         } else {
             kmerge_tree_c<logline, logfile_data, logfile::iterator> merge(
                 file_count);
@@ -814,7 +784,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         if (this->lss_index_delegate != nullptr) {
             this->lss_index_delegate->index_complete(*this);
         }
-        log_perf();
     }
 
     // FIXME: (Somewhere else...)  after lss_filtered_index is rebuilt, the existing
@@ -841,7 +810,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
             break;
     }
 
-        log_perf();
     return retval;
 }
 

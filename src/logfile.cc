@@ -268,29 +268,8 @@ logfile::rebuild_result_t logfile::rebuild_index()
 
     this->lf_activity.la_polls += 1;
 
-    static int perf_index = -1;
-    static struct rusage mark[2];
-    if (perf_index<0) {
-        getrusage(RUSAGE_SELF, &mark[0]);
-        perf_index = 1;
     }
 
-    #define log_perf() { \
-        getrusage(RUSAGE_SELF, &mark[perf_index]); \
-        perf_index = !perf_index; \
-        static struct rusage perf; \
-        rusagesub(mark[!perf_index], mark[perf_index], mark[perf_index]); \
-        rusageadd(perf, mark[perf_index], perf); \
-        if (0) log_info("CPU time(%4u):    utime=%d.%06d    stime=%d.%06d  cum:   utime=%d.%06d  stime=%d.%06d", \
-            __LINE__, \
-            mark[perf_index].ru_utime.tv_sec, mark[perf_index].ru_utime.tv_usec, \
-            mark[perf_index].ru_stime.tv_sec, mark[perf_index].ru_stime.tv_usec, \
-            perf.ru_utime.tv_sec, perf.ru_utime.tv_usec, \
-            perf.ru_stime.tv_sec, perf.ru_stime.tv_usec); \
-        }
-
-    // This line should log the time we spend *outside* this function
-    log_perf();
 
     // TODO: Run this continuously in a thread and poll for updates in logfile_sub_source.cc in real-time
 
@@ -321,8 +300,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
         }
         this->lf_stat = st;
 
-        log_perf();
-
         if (this->lf_line_buffer.is_data_available(this->lf_index_size, this->lf_stat.st_size)) {
             this->lf_activity.la_reads += 1;
 
@@ -330,7 +307,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
             // line buffer's notion of the file size since it may be compressed.
             size_t rollback_size = 0;
 
-        log_perf();
             if (!this->lf_index.empty()) {
 
                 /*
@@ -375,7 +351,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
         this->lf_sort_needed = false;
         auto prev_range = file_range{off};
 
-    log_perf();
         // Parse up to 10,000 lines at a time, but don't stop in the middle of a block
         size_t line_limit = 10000;
         while (line_limit || this->lf_index.back().get_sub_offset() != 0) {
@@ -450,7 +425,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
             }
         }
 
-    log_perf();
         off = prev_range.next_offset();
 
         if (!line_limit) {
@@ -492,8 +466,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
         this->lf_index_size = off;
     }
 
-    log_perf();
-
     this->lf_index_time = this->lf_line_buffer.get_file_time();
     if (!this->lf_index_time) {
         this->lf_index_time = this->lf_stat.st_mtime;
@@ -505,8 +477,6 @@ logfile::rebuild_result_t logfile::rebuild_index()
                  this->lf_filename.c_str());
         this->lf_out_of_time_order_count = 0;
     }
-
-    log_perf();
 
     return retval;
 }
