@@ -550,7 +550,6 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
 {
     iterator iter;
     size_t total_lines = 0;
-    bool full_sort = false;
     int file_count = 0;
     bool force = this->lss_force_rebuild;
     // FIXME: Handle external force requests more gently
@@ -636,6 +635,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         force = true;
     }
 
+#if 0
     constexpr bool never_force = true;
     if (force && !never_force) {
         full_sort = true;
@@ -654,6 +654,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
         this->lss_basename_width = 0;
         this->lss_filename_width = 0;
     }
+#endif
 
     if (retval != rebuild_result::rr_no_change || force) {
         size_t start_size = this->lss_index.size();
@@ -673,79 +674,53 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
                 this->lss_filename_width, lf->get_filename().size());
         }
 
-        // Sort the whole thing
-        if (full_sort) {
-            for (auto ld : this->lss_files) {
-                shared_ptr<logfile> lf = ld->get_file();
+        // FIXME: Does file_count need to reflect the actual number of files with data?
+        kmerge_tree_c<logline, logfile_data, logfile::iterator> merge(
+            file_count);
 
-                if (lf == nullptr) {
-                    continue;
-                }
-
-                // Recreate lss_index from scratch as (HIGH:file_index :: LOW:line_number)
-                for (size_t line_index = 0; line_index < lf->size(); line_index++) {
-                    content_line_t con_line(ld->ld_file_index * MAX_LINES_PER_FILE +
-                                            line_index);
-
-                    this->lss_index.push_back(con_line);
-                }
+        for (iter = this->lss_files.begin();
+                iter != this->lss_files.end();
+                iter++) {
+            logfile_data *ld = *iter;
+            shared_ptr<logfile> lf = ld->get_file();
+            if (lf == NULL) {
+                continue;
             }
 
-            log_info("DELAY> Sorting");
-
-            // XXX get rid of this full sort on the initial run, it's not
-            // needed unless the file is not in time-order
-            logline_cmp line_cmper(*this);
-            sort(this->lss_index.begin(), this->lss_index.end(), line_cmper);
-            log_info("DELAY< Sorting");
-        } else {
-            kmerge_tree_c<logline, logfile_data, logfile::iterator> merge(
-                file_count);
-
-            for (iter = this->lss_files.begin();
-                 iter != this->lss_files.end();
-                 iter++) {
-                logfile_data *ld = *iter;
-                shared_ptr<logfile> lf = ld->get_file();
-                if (lf == NULL) {
-                    continue;
-                }
-
-                auto begin = lf->begin() + ld->ld_lines_indexed;
-                if (begin == lf->end()) {
-                    continue;
-                }
-
-                merge.add(ld, begin, lf->end());
+            auto begin = lf->begin() + ld->ld_lines_indexed;
+            if (begin == lf->end()) {
+                continue;
             }
 
-            merge.execute();
-            for (;;) {
-                logfile::iterator lf_iter;
-                logfile_data *ld;
+            merge.add(ld, begin, lf->end());
+        }
 
-                if (!merge.get_top(ld, lf_iter)) {
-                    break;
-                }
+        merge.execute();
+        for (;;) {
+            logfile::iterator lf_iter;
+            logfile_data *ld;
 
-
-                int file_index = ld->ld_file_index;
-                int line_index = ld->ld_lines_indexed++;
-                ensure(lf_iter - ld->get_file()->begin() == line_index);
-
-                // Add onto lss_index as (HIGH:file_index :: LOW:line_number), already sorted
-                content_line_t con_line(file_index * MAX_LINES_PER_FILE +
-                                        line_index);
-
-                this->lss_index.push_back(con_line);
-
-                if (lf_iter+1 == ld->get_file()->end())
-                {
-                    // stop when we consume the last line of any source file being merged
-                    break;
-                }
-                merge.next();
+            if (!merge.get_top(ld, lf_iter)) {
+                break;
             }
+
+
+            int file_index = ld->ld_file_index;
+            int line_index = ld->ld_lines_indexed++;
+            ensure(lf_iter - ld->get_file()->begin() == line_index);
+
+            // Add onto lss_index as (HIGH:file_index :: LOW:line_number), already sorted
+            content_line_t con_line(file_index * MAX_LINES_PER_FILE +
+                                    line_index);
+
+            this->lss_index.push_back(con_line);
+
+            if (lf_iter+1 == ld->get_file()->end())
+            {
+                // stop when we consume the last line of any source file being merged
+                break;
+            }
+            merge.next();
         }
 
         if (this->lss_filtered_index.empty()) {
@@ -799,7 +774,7 @@ logfile_sub_source::rebuild_result logfile_sub_source::rebuild_index()
     // Maybe what is needed is some notification call like this:
     //    filter_changed(added_lines_vec, removed_lines_vec);
 
-    if (retval == rebuild_result::rr_full_rebuild && never_force) {
+    if (retval == rebuild_result::rr_full_rebuild) {
         retval = rebuild_result::rr_appended_lines;
     }
 
