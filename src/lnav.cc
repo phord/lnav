@@ -555,12 +555,13 @@ void rebuild_indexes()
 
     bool scroll_downs[LNV__MAX];
 
-    for (int lpc = 0; lpc < LNV__MAX; lpc++) {
-        old_bottoms[lpc] = lnav_data.ld_views[lpc].get_top_for_last_row();
-        scroll_downs[lpc] =
-            (lnav_data.ld_views[lpc].get_top() >= old_bottoms[lpc]) &&
-            !(lnav_data.ld_flags & LNF_HEADLESS);
-    }
+    // for (int lpc = 0; lpc < LNV__MAX; lpc++) {
+    //     old_bottoms[lpc] = lnav_data.ld_views[lpc].get_top_for_last_row();
+    //     scroll_downs[lpc] =
+    //         (lnav_data.ld_views[lpc].get_top() >= old_bottoms[lpc]) &&
+    //         !(lnav_data.ld_flags & LNF_HEADLESS);
+    // }
+    // FIXME: ^^^^^^^^^^^^^^^^^^^^^^ Time waster
 
     log_perf();
     {
@@ -621,27 +622,29 @@ void rebuild_indexes()
 
     log_perf();
 
-    if (result != logfile_sub_source::rebuild_result::rr_no_change) {
-        size_t new_count = lss.text_line_count();
-        bool force =
-            result == logfile_sub_source::rebuild_result::rr_full_rebuild;
+    // if (result != logfile_sub_source::rebuild_result::rr_no_change) {
+    //     size_t new_count = lss.text_line_count();
+    //     bool force =
+    //         result == logfile_sub_source::rebuild_result::rr_full_rebuild;
 
-        if ((!scroll_downs[LNV_LOG] || log_view.get_top() > new_count) &&
-            force) {
-            scroll_downs[LNV_LOG] = false;
-        }
+    //     if ((!scroll_downs[LNV_LOG] || log_view.get_top() > new_count) &&
+    //         force) {
+    //         scroll_downs[LNV_LOG] = false;
+    //     }
 
-        log_view.reload_data();
-    }
+    //     log_view.reload_data();
+    // }
+    // FIXME: ^^^^^^^^^^^^^^^^^^^^^^ Time waster
     log_perf();
 
-    for (int lpc = 0; lpc < LNV__MAX; lpc++) {
-        textview_curses &scroll_view = lnav_data.ld_views[lpc];
+    // for (int lpc = 0; lpc < LNV__MAX; lpc++) {
+    //     textview_curses &scroll_view = lnav_data.ld_views[lpc];
 
-        if (scroll_downs[lpc] && scroll_view.get_top_for_last_row() > scroll_view.get_top()) {
-            scroll_view.set_top(scroll_view.get_top_for_last_row());
-        }
-    }
+    //     if (scroll_downs[lpc] && scroll_view.get_top_for_last_row() > scroll_view.get_top()) {
+    //         scroll_view.set_top(scroll_view.get_top_for_last_row());
+    //     }
+    // }
+    // FIXME: ^^^^^^^^^^^^^^^^^^^^^^ Time waster
     log_perf();
 
     lnav_data.ld_view_stack.top() | [] (auto tc) {
